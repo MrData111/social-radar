@@ -1,0 +1,14 @@
+# Ukrywamy środowisko (żeby nie zaśmiecać projektu tysiącami plików)
+venv/
+__pycache__/
+
+# Ukrywamy plik z kluczami API (żeby nikt nie ukradł Twoich tokenów)
+.env
+
+# Ukrywamy lokalną bazę danych
+*.duckdb
+*.duckdb.wal
+
+# Ukrywamy ustawienia edytora
+.vscode/
+.refact/
