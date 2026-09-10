@@ -12,3 +12,8 @@ __pycache__/
 # Ukrywamy ustawienia edytora
 .vscode/
 .refact/
+.continue/
+continue/
+
+# Ukrywamy wygenerowane raporty i dane eksperymentalne
+exports/
