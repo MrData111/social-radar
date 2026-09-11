@@ -8,8 +8,9 @@ def get_connection():
 def init_db():
     con = get_connection()
     
-    # Drop existing tables to recreate with correct surrogate key schema if needed
+    # Drop existing tables in reverse order of foreign key dependencies to avoid Catalog Error
     con.execute("DROP TABLE IF EXISTS Dim_Clusters;")
+    con.execute("DROP TABLE IF EXISTS Dim_Camps;")
     con.execute("DROP TABLE IF EXISTS Fact_Comments;")
     con.execute("DROP TABLE IF EXISTS Dim_Videos;")
     con.execute("DROP TABLE IF EXISTS Dim_Channels;")

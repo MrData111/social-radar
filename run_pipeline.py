@@ -391,9 +391,11 @@ if video_ids:
         comments = fetch_comments(video["id"], max_comments=max_comments_per_video)
         print(f"📥 Fetched {len(comments)} comments. Analyzing with AI...")
         
-        analysis = analyze_discourse_with_ai(comments, video["title"], niche)
+        analysis, video_camps = analyze_discourse_with_ai(comments, video["title"], niche)
+        video["identified_camps"] = video_camps
+        
         camp_counts = pd.Series(result["stance"] for result in analysis).value_counts()
-        camp_counts = camp_counts[camp_counts.index.str.match(r"^CAMP_[A-E]$")]
+        camp_counts = camp_counts[camp_counts.index.str.match(r"^[A-E]$")]
         total_camp_comments = camp_counts.sum()
         camp_shares = (
             "; ".join(
@@ -563,52 +565,39 @@ with open(output_comments_csv, "w", newline="", encoding="utf-8-sig") as output_
     writer.writerow([
         "Comment Key", "Comment ID", "Video Key", "Comment", "Author", "Comment Date", 
         "Likes", "Reply Count", "Is Reply", "Engagement Score",
-        "Stance", "Arousal Score", "Emotion", "Core Argument"
+        "Camp Letter", "Arousal Score", "Emotion", "Core Argument"
     ])
     writer.writerows(comments_export_rows)
 
-# 4. Zapis nowego pliku wymiaru _camps.csv (szeroki układ)
+# 4. Zapis nowego pliku wymiaru _camps.csv (relacyjny / długi układ)
 camps_export_rows = []
+camp_row_counter = 1
+
 for video in selected_videos:
     v_key = video_key_map[video["id"]]
-    vid_comms = [c for c in analyzed_comments if c.get("video_id") == video["id"]]
+    video_camps = video.get("identified_camps", [])
     
-    raw_def = ""
-    for c in vid_comms:
-        if c.get("camp_definition"):
-            raw_def = c["camp_definition"]
-            break
-            
-    camp_counts = pd.Series([c["stance"] for c in vid_comms]).value_counts(normalize=True) * 100 if vid_comms else pd.Series(dtype=float)
-    
-    row_data = [v_key]
-    for camp_id in ["CAMP_A", "CAMP_B", "CAMP_C", "CAMP_D", "CAMP_E"]:
-        def extract_clean_definition(full_text, c_id):
-            if not full_text:
-                return ""
-            pattern = rf"{c_id}:?\s*(.*?)(?=CAMP_[A-E]|$)"
-            match = re.search(pattern, str(full_text), re.IGNORECASE | re.DOTALL)
-            if match:
-                return match.group(1).strip().rstrip(';')
-            return ""
-
-        c_def = extract_clean_definition(raw_def, camp_id)
-        c_share = float(camp_counts.get(camp_id, 0.0))
-        
-        row_data.append(c_def)
-        row_data.append(c_share)
-        
-    camps_export_rows.append(row_data)
+    for camp in video_camps:
+        raw_letter = str(camp.get("camp_letter", "")).upper().replace("CAMP_", "")
+        camps_export_rows.append([
+            camp_row_counter,
+            v_key,
+            raw_letter,
+            camp.get("camp_title"),
+            camp.get("perspective_group"),
+            camp.get("camp_description")
+        ])
+        camp_row_counter += 1
 
 with open(output_camps_csv, "w", newline="", encoding="utf-8-sig") as output_file:
     writer = csv.writer(output_file, delimiter=";")
     writer.writerow([
-        "Video Key",
-        "Camp A", "Percent Share of Camp A",
-        "Camp B", "Percent Share of Camp B",
-        "Camp C", "Percent Share of Camp C",
-        "Camp D", "Percent Share of Camp D",
-        "Camp E", "Percent Share of Camp E"
+        "camp_key",
+        "video_key",
+        "camp_letter",
+        "camp_title",
+        "perspective_group",
+        "camp_description"
     ])
     writer.writerows(camps_export_rows)
 

@@ -8,7 +8,7 @@ def calculate_shannon_polarization(stance_series):
     Neutral or spam comments are excluded from the camp distribution.
     """
     counts = stance_series.value_counts()
-    camp_counts = counts[counts.index.to_series().str.match(r"^CAMP_[A-E]$")]
+    camp_counts = counts[counts.index.to_series().str.match(r"^[A-E]$")]
     total_camp_comments = camp_counts.sum()
 
     if total_camp_comments == 0 or len(camp_counts) <= 1:
@@ -72,9 +72,9 @@ def compute_toi_cluster_metrics(df_videos, df_comments):
         if pd.isna(of):
             of = 0.0
         
-        # Extract the dominant thesis for each camp.
-        camp_a_args = v_comms[v_comms["stance"] == "CAMP_A"]["core_argument"].value_counts()
-        camp_b_args = v_comms[v_comms["stance"] == "CAMP_B"]["core_argument"].value_counts()
+                        # Extract the dominant thesis for each camp.
+        camp_a_args = v_comms[v_comms["stance"] == "A"]["core_argument"].value_counts()
+        camp_b_args = v_comms[v_comms["stance"] == "B"]["core_argument"].value_counts()
         
         thesis_a = camp_a_args.index[0] if not camp_a_args.empty else "Camp A position"
         thesis_b = camp_b_args.index[0] if not camp_b_args.empty else "Camp B position"

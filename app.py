@@ -65,6 +65,7 @@ def load_csv_data(file_path):
             'Is Reply': 'is_reply',
             'Engagement Score': 'engagement_score',
             'Stance': 'stance',
+            'Camp Letter': 'stance',
             'Arousal Score': 'arousal_score',
             'Emotion': 'emotion_tag',
             'Core Argument': 'core_argument'
@@ -107,11 +108,31 @@ def load_csv_data(file_path):
             if 'video_key' in df_comms.columns and 'video_key' in df_vids.columns:
                 df_comms = df_comms.merge(df_vids, on='video_key', how='left')
 
-        # Szukamy powiązanego pliku _camps.csv i dołączamy go, aby móc korzystać z gotowych udziałów i definicji
+                # Szukamy powiązanego pliku _camps.csv i dołączamy go, aby móc korzystać z gotowych udziałów i definicji
         camps_csv = Path(str(file_path).replace("_comments", "_camps"))
         if camps_csv.exists():
             df_camps = pd.read_csv(camps_csv, sep=";", encoding="utf-8-sig")
-            if 'video_key' in df_comms.columns and 'Video Key' in df_camps.columns:
+            # Zmieniamy nazwy kolumn z _camps.csv, aby pasowały do oczekiwań dashboardu (np. Camp A, Percent Share of Camp A)
+            rename_camps = {}
+            if 'camp_letter' in df_camps.columns:
+                # Jeśli plik jest w nowym długim układzie (relacyjnym), pivotujemy go lub obsługujemy dynamicznie
+                pass
+            # Dla wstecznej kompatybilności i nowego układu:
+            if 'video_key' in df_comms.columns and 'video_key' in df_camps.columns:
+                # Jeśli mamy wiele campów dla jednego video_key w układzie długim, grupujemy/agregujemy lub pivotujemy
+                df_camps_pivot = pd.DataFrame()
+                for v_key, group in df_camps.groupby('video_key'):
+                    row_dict = {'video_key': v_key}
+                    total_camps = len(group)
+                    for _, camp_row in group.iterrows():
+                        c_let = str(camp_row.get('camp_letter', '')).upper()
+                        row_dict[f'Camp {c_let}'] = str(camp_row.get('camp_description', ''))
+                        # Szacujemy udział procentowy jeśli nie ma w pliku
+                        row_dict[f'Percent Share of Camp {c_let}'] = round(100.0 / total_camps, 1) if total_camps > 0 else 0.0
+                    df_camps_pivot = pd.concat([df_camps_pivot, pd.DataFrame([row_dict])], ignore_index=True)
+                
+                df_comms = df_comms.merge(df_camps_pivot, on='video_key', how='left')
+            elif 'video_key' in df_comms.columns and 'Video Key' in df_camps.columns:
                 df_comms = df_comms.merge(df_camps, left_on='video_key', right_on='Video Key', how='left')
                 if 'Video Key' in df_comms.columns:
                     df_comms = df_comms.drop(columns=['Video Key'])
@@ -135,12 +156,12 @@ def extract_total_comments(coverage_text):
     return int(match.group(1)) if match else 0
 
 def extract_camp_desc(full_text, camp_id):
-    """Precyzyjnie wyciąga opis tylko dla danego CAMP_X, usuwając tagi."""
+    """Precyzyjnie wyciąga opis tylko dla danej litery campu, usuwając tagi."""
     if pd.isna(full_text) or full_text == "":
         return "No definition available."
     
     text = str(full_text)
-    pattern = rf"{camp_id}:?\s*(.*?)(?=CAMP_[A-E]|$)"
+    pattern = rf"{camp_id}:?\s*(.*?)(?=[A-E]|$)"
     match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
     
     if match:
@@ -159,16 +180,11 @@ def get_video_stats(df):
         
         # Pobieramy całkowitą liczbę komentarzy z _videos.csv jeśli jest dostępna, w przeciwieństwie len(group)
         total_comments = int(group['total_comments'].iloc[0]) if 'total_comments' in group.columns and pd.notna(group['total_comments'].iloc[0]) else len(group)
+        analyzed_count = len(group)
+        coverage_pct = (analyzed_count / total_comments * 100) if total_comments > 0 else 100.0
         
-        # Zbuduj podsumowanie camp_shares bezpośrednio z kolumn _camps.csv
-        shares_parts = []
-        for camp_letter, camp_name in [('A', 'Camp A'), ('B', 'Camp B'), ('C', 'Camp C'), ('D', 'Camp D'), ('E', 'Camp E')]:
-            share_col = f"Percent Share of Camp {camp_letter}"
-            if share_col in group.columns:
-                val = group[share_col].iloc[0]
-                if pd.notna(val) and val > 0:
-                    shares_parts.append(f"CAMP_{camp_letter}: {val:.1f}%")
-        camp_shares = "; ".join(shares_parts) if shares_parts else "No identified camps"
+                # Zbuduj podsumowanie camp_shares bezpośrednio z kolumn _camps.csv lub danych
+        camp_shares = ""
         
         toi_score = (0.4 * i_pol + 0.4 * e_arousal + 0.2 * min(d_depth/5, 1.0))
         
@@ -186,7 +202,7 @@ def get_video_stats(df):
             'toi_score': toi_score,
             'total_comments': total_comments,
             'opportunity_quadrant': quadrant,
-            'coverage': f"100% ({len(group)}/{total_comments})",
+            'coverage': f"{coverage_pct:.1f}% ({analyzed_count}/{total_comments})",
             'camp_shares': camp_shares,
             'link': group['link'].iloc[0] if 'link' in group.columns else "#"
         })
@@ -296,7 +312,7 @@ if not df_comments.empty:
 
     for idx, row in df_clusters.reset_index().iterrows():
         with st.expander(f"#{idx+1} | 💬 {row['total_comments']:,} comments | {row['topic_name']}"):
-            st.caption(f"📊 {row['coverage']} | 📢 Shares: {row['camp_shares']}")
+            st.caption(f"📊 {row['coverage']}")
             
             c_info, c_camps = st.columns([1, 4])  # Więcej miejsca na campy
             
@@ -323,7 +339,7 @@ if not df_comments.empty:
                             c_def = row_data[def_col]
                             c_share = row_data[share_col]
                             if pd.notna(c_def) and str(c_def).strip() != "" and pd.notna(c_share) and c_share > 0:
-                                active_camps.append((f"CAMP_{camp_letter}", c_def, c_share))
+                                active_camps.append((camp_letter, c_def, c_share))
                     
                     if active_camps:
                         camp_cols = st.columns(len(active_camps))
@@ -331,13 +347,12 @@ if not df_comments.empty:
                             with camp_cols[i]:
                                 st.markdown(f"""
                                 <div class="camp-box">
-                                    <b style="color: #58a6ff; font-size: 1.1rem;">{camp_id} ({share:.1f}%)</b><br>
+                                    <b style="color: #58a6ff; font-size: 1.1rem;">Camp {camp_id}</b><br>
                                     <p style="color: #8b949e; font-size: 0.85rem; margin-top: 8px;">{desc}</p>
                                 </div>
                                 """, unsafe_allow_html=True)
                                 
-                                camp_name_mapped = camp_id
-                                top_arg = video_comments[video_comments['stance'] == camp_name_mapped]['core_argument'].mode()
+                                top_arg = video_comments[video_comments['stance'] == camp_id]['core_argument'].mode()
                                 if not top_arg.empty:
                                     st.markdown(f"""
                                     <div class="argument-box">
