@@ -521,7 +521,6 @@ for video in selected_videos:
         video["published_at"][:10],
         video["views"],
         video.get("like_count", 0),
-        video["subscribers"],
         video["views_per_hour"],
         video["comments_count"],
         video.get("duration", ""),
@@ -533,16 +532,67 @@ with open(output_videos_csv, "w", newline="", encoding="utf-8-sig") as output_fi
     writer = csv.writer(output_file, delimiter=";")
     writer.writerow([
         "Video Key", "Video ID", "Title", "Channel Key", "Published Date", 
-        "Views", "Likes", "Subscribers", "Views Per Hour (VPH)", "Total Comments",
+        "Views", "Total Likes", "Views Per Hour (VPH)", "Total Comments",
         "Duration", "Tags", "Description"
     ])
     writer.writerows(video_export_rows)
+
+# 4. Zapis nowego pliku wymiaru _camps.csv (relacyjny / długi układ)
+camps_export_rows = []
+camp_lookup = {}
+camp_row_counter = 1
+
+for video in selected_videos:
+    v_key = video_key_map[video["id"]]
+    video_camps = video.get("identified_camps", [])
+    
+    for camp in video_camps:
+        raw_letter = str(camp.get("camp_letter", "")).upper().replace("CAMP_", "")
+        
+        # Zapisujemy mapowanie: (video_id, raw_letter) -> globalny camp_row_counter
+        camp_lookup[(video["id"], raw_letter)] = camp_row_counter
+
+        title_val = str(camp.get("camp_title", ""))
+        if title_val:
+            title_val = title_val[0].upper() + title_val[1:]
+            
+        desc_val = str(camp.get("camp_description", ""))
+        if desc_val:
+            desc_val = desc_val[0].upper() + desc_val[1:]
+
+        pers_val = str(camp.get("perspective_group", ""))
+        if pers_val:
+            pers_val = pers_val[0].upper() + pers_val[1:]
+
+        camps_export_rows.append([
+            camp_row_counter,
+            v_key,
+            title_val,
+            pers_val,
+            desc_val
+        ])
+        camp_row_counter += 1
+
+with open(output_camps_csv, "w", newline="", encoding="utf-8-sig") as output_file:
+    writer = csv.writer(output_file, delimiter=";")
+    writer.writerow([
+        "Camp Key",
+        "Video Key",
+        "Camp Title",
+        "Perspective Group",
+        "Camp Description"
+    ])
+    writer.writerows(camps_export_rows)
 
 # 1. Zapis tabeli faktów (komentarze z comment_key na początku, video_key zaraz za comment_id, odchudzona)
 comments_export_rows = []
 for idx, row in enumerate(csv_rows, start=1):
     v_id = row[0]
     v_key = video_key_map.get(v_id, 1)
+    raw_stance = str(row[13]).upper().replace("CAMP_", "")
+    # Pobieramy globalny Camp Key z mapowania (lub domyślnie 1, jeśli brak dopasowania)
+    c_key = camp_lookup.get((v_id, raw_stance), 1)
+
     comments_export_rows.append([
         idx,     # Comment Key
         row[5],  # Comment ID
@@ -554,7 +604,7 @@ for idx, row in enumerate(csv_rows, start=1):
         row[10], # Reply Count
         row[11], # Is Reply
         row[12], # Engagement Score
-        row[13], # Stance
+        c_key,   # Camp Key (zastąpił Camp Letter)
         row[14], # Arousal Score
         row[15], # Emotion
         row[16]  # Core Argument
@@ -565,41 +615,9 @@ with open(output_comments_csv, "w", newline="", encoding="utf-8-sig") as output_
     writer.writerow([
         "Comment Key", "Comment ID", "Video Key", "Comment", "Author", "Comment Date", 
         "Likes", "Reply Count", "Is Reply", "Engagement Score",
-        "Camp Letter", "Arousal Score", "Emotion", "Core Argument"
+        "Camp Key", "Arousal Score", "Emotion", "Core Argument"
     ])
     writer.writerows(comments_export_rows)
-
-# 4. Zapis nowego pliku wymiaru _camps.csv (relacyjny / długi układ)
-camps_export_rows = []
-camp_row_counter = 1
-
-for video in selected_videos:
-    v_key = video_key_map[video["id"]]
-    video_camps = video.get("identified_camps", [])
-    
-    for camp in video_camps:
-        raw_letter = str(camp.get("camp_letter", "")).upper().replace("CAMP_", "")
-        camps_export_rows.append([
-            camp_row_counter,
-            v_key,
-            raw_letter,
-            camp.get("camp_title"),
-            camp.get("perspective_group"),
-            camp.get("camp_description")
-        ])
-        camp_row_counter += 1
-
-with open(output_camps_csv, "w", newline="", encoding="utf-8-sig") as output_file:
-    writer = csv.writer(output_file, delimiter=";")
-    writer.writerow([
-        "camp_key",
-        "video_key",
-        "camp_letter",
-        "camp_title",
-        "perspective_group",
-        "camp_description"
-    ])
-    writer.writerows(camps_export_rows)
 
 # Keep the dashboard database synchronized with the CSV export.
 init_db()

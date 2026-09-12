@@ -11,12 +11,12 @@ gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 GEMINI_MODEL = "gemini-3.5-flash-lite"
 
 VALID_PERSPECTIVE_GROUPS = [
-    "Youtuber vs Audience",
-    "Creator vs Audience",
-    "Experts vs Beginners",
-    "Hardcore vs Casuals",
-    "Faction Rivalry",
-    "Community"
+    "Youtuber vs Audience (comments criticizing or debating the creator's video decisions, opinions, bias, or behavior)",
+    "Creator vs Audience (clashes or contrasting perspectives between the content creator and the viewing community)",
+    "Experts vs Beginners (discussions contrasting the needs, skills, or viewpoints of advanced professionals versus novices or newcomers)",
+    "Hardcore vs Casuals (division between deeply committed, high-effort participants and relaxed, casual users)",
+    "Faction Rivalry (ideological wars, debates, or clashes between opposing subgroups, factions, or competing approaches within the community)",
+    "Community (broad community sentiment, general observations, and neutral reflections on the overall state of the niche)"
 ]
 
 

@@ -50,7 +50,7 @@ st.markdown("*Content Arbitrage Engine powered by AI discourse analysis*")
 
 @st.cache_data
 def load_csv_data(file_path):
-    """Wczytuje CSV z faktami (komentarze) i opcjonalnie łączy z wymiarem wideo oraz campów."""
+    """Wczytuje CSV z faktami (komentarze) i łączy z wymiarem wideo oraz campów po camp_key."""
     try:
         df_comms = pd.read_csv(file_path, sep=";", encoding="utf-8-sig")
         comms_mapping = {
@@ -64,8 +64,7 @@ def load_csv_data(file_path):
             'Reply Count': 'reply_count',
             'Is Reply': 'is_reply',
             'Engagement Score': 'engagement_score',
-            'Stance': 'stance',
-            'Camp Letter': 'stance',
+            'Camp Key': 'camp_key',
             'Arousal Score': 'arousal_score',
             'Emotion': 'emotion_tag',
             'Core Argument': 'core_argument'
@@ -83,8 +82,7 @@ def load_csv_data(file_path):
                 'Channel Key': 'channel_key',
                 'Published Date': 'published_at',
                 'Views': 'views',
-                'Likes': 'video_likes',
-                'Subscribers': 'subscribers',
+                'Total Likes': 'video_likes',
                 'Views Per Hour (VPH)': 'views_per_hour',
                 'Total Comments': 'total_comments',
                 'Duration': 'duration',
@@ -93,7 +91,7 @@ def load_csv_data(file_path):
             }
             df_vids = df_vids.rename(columns=vids_mapping)
             
-            # Pobieramy również plik _channels.csv i łączymy po channel_key, aby odzyskać channel_title
+            # Pobieramy również plik _channels.csv i łączymy po channel_key
             channels_csv = Path(str(file_path).replace("_comments", "_channels"))
             if channels_csv.exists():
                 df_ch = pd.read_csv(channels_csv, sep=";", encoding="utf-8-sig")
@@ -104,38 +102,24 @@ def load_csv_data(file_path):
                 if 'channel_key' in df_vids.columns and 'channel_key' in df_ch.columns:
                     df_vids = df_vids.merge(df_ch[['channel_key', 'channel_title']], on='channel_key', how='left')
 
-            # Łączymy tabelę faktów (komentarze) z wymiarem wideo po video_key
             if 'video_key' in df_comms.columns and 'video_key' in df_vids.columns:
                 df_comms = df_comms.merge(df_vids, on='video_key', how='left')
 
-                # Szukamy powiązanego pliku _camps.csv i dołączamy go, aby móc korzystać z gotowych udziałów i definicji
+        # Szukamy powiązanego pliku _camps.csv i łączymy po camp_key
         camps_csv = Path(str(file_path).replace("_comments", "_camps"))
         if camps_csv.exists():
             df_camps = pd.read_csv(camps_csv, sep=";", encoding="utf-8-sig")
-            # Zmieniamy nazwy kolumn z _camps.csv, aby pasowały do oczekiwań dashboardu (np. Camp A, Percent Share of Camp A)
-            rename_camps = {}
-            if 'camp_letter' in df_camps.columns:
-                # Jeśli plik jest w nowym długim układzie (relacyjnym), pivotujemy go lub obsługujemy dynamicznie
-                pass
-            # Dla wstecznej kompatybilności i nowego układu:
-            if 'video_key' in df_comms.columns and 'video_key' in df_camps.columns:
-                # Jeśli mamy wiele campów dla jednego video_key w układzie długim, grupujemy/agregujemy lub pivotujemy
-                df_camps_pivot = pd.DataFrame()
-                for v_key, group in df_camps.groupby('video_key'):
-                    row_dict = {'video_key': v_key}
-                    total_camps = len(group)
-                    for _, camp_row in group.iterrows():
-                        c_let = str(camp_row.get('camp_letter', '')).upper()
-                        row_dict[f'Camp {c_let}'] = str(camp_row.get('camp_description', ''))
-                        # Szacujemy udział procentowy jeśli nie ma w pliku
-                        row_dict[f'Percent Share of Camp {c_let}'] = round(100.0 / total_camps, 1) if total_camps > 0 else 0.0
-                    df_camps_pivot = pd.concat([df_camps_pivot, pd.DataFrame([row_dict])], ignore_index=True)
-                
-                df_comms = df_comms.merge(df_camps_pivot, on='video_key', how='left')
-            elif 'video_key' in df_comms.columns and 'Video Key' in df_camps.columns:
-                df_comms = df_comms.merge(df_camps, left_on='video_key', right_on='Video Key', how='left')
-                if 'Video Key' in df_comms.columns:
-                    df_comms = df_comms.drop(columns=['Video Key'])
+            camps_mapping = {
+                'Camp Key': 'camp_key',
+                'Video Key': 'video_key',
+                'Camp Title': 'camp_title',
+                'Perspective Group': 'perspective_group',
+                'Camp Description': 'camp_description'
+            }
+            df_camps = df_camps.rename(columns=camps_mapping)
+
+            if 'camp_key' in df_comms.columns and 'camp_key' in df_camps.columns:
+                df_comms = df_comms.merge(df_camps, on=['camp_key', 'video_key'], how='left')
                 
         # Konwersja typów numerycznych
         df_comms['like_count'] = pd.to_numeric(df_comms['like_count'], errors='coerce').fillna(0)
@@ -171,20 +155,17 @@ def extract_camp_desc(full_text, camp_id):
     return text
 
 def get_video_stats(df):
-    """Grupuje komentarze po filmach i liczy statystyki analityczne przy użyciu danych z _camps.csv."""
+    """Grupuje komentarze po filmach i liczy statystyki analityczne przy użyciu campów."""
     video_stats = []
     for title, group in df.groupby('title'):
-        i_pol = calculate_shannon_polarization(group['stance'])
+        stance_series = group['camp_key'] if 'camp_key' in group.columns else group.get('camp_title', pd.Series([1]*len(group)))
+        i_pol = calculate_shannon_polarization(stance_series)
         e_arousal = calculate_weighted_arousal(group)
         d_depth = calculate_discussion_depth(group) if 'is_reply' in group.columns else 0.0
         
-        # Pobieramy całkowitą liczbę komentarzy z _videos.csv jeśli jest dostępna, w przeciwieństwie len(group)
         total_comments = int(group['total_comments'].iloc[0]) if 'total_comments' in group.columns and pd.notna(group['total_comments'].iloc[0]) else len(group)
         analyzed_count = len(group)
         coverage_pct = (analyzed_count / total_comments * 100) if total_comments > 0 else 100.0
-        
-                # Zbuduj podsumowanie camp_shares bezpośrednio z kolumn _camps.csv lub danych
-        camp_shares = ""
         
         toi_score = (0.4 * i_pol + 0.4 * e_arousal + 0.2 * min(d_depth/5, 1.0))
         
@@ -195,7 +176,8 @@ def get_video_stats(df):
 
         video_stats.append({
             'topic_name': title,
-            'channel_title': group['channel_title'].iloc[0],
+            'video_key': group['video_key'].iloc[0] if 'video_key' in group.columns else 0,
+            'channel_title': group['channel_title'].iloc[0] if 'channel_title' in group.columns else "Unknown",
             'shannon_polarization': i_pol,
             'weighted_arousal': e_arousal,
             'discussion_depth': d_depth,
@@ -203,7 +185,6 @@ def get_video_stats(df):
             'total_comments': total_comments,
             'opportunity_quadrant': quadrant,
             'coverage': f"{coverage_pct:.1f}% ({analyzed_count}/{total_comments})",
-            'camp_shares': camp_shares,
             'link': group['link'].iloc[0] if 'link' in group.columns else "#"
         })
     return pd.DataFrame(video_stats).sort_values('total_comments', ascending=False)
@@ -240,8 +221,7 @@ if videos_csv.exists():
             'Channel Key': 'channel_key',
             'Published Date': 'published_at',
             'Views': 'views',
-            'Likes': 'likes',
-            'Subscribers': 'subscribers',
+            'Total Likes': 'likes',
             'Views Per Hour (VPH)': 'views_per_hour',
             'Total Comments': 'total_comments'
         })
@@ -263,10 +243,10 @@ df_comments = load_csv_data(selected_csv)
 if not df_comments.empty:
     df_clusters = get_video_stats(df_comments)
 
-    # Dołączamy dane z wymiaru wideo (np. Views, VPH), jeśli są dostępne
+        # Dołączamy dane z wymiaru wideo (np. Views, VPH), jeśli są dostępne
     if not df_videos.empty and 'title' in df_videos.columns:
         df_clusters = df_clusters.merge(
-            df_videos[['title', 'views', 'views_per_hour', 'subscribers']],
+            df_videos[['title', 'views', 'views_per_hour']],
             left_on='topic_name',
             right_on='title',
             how='left',
@@ -307,8 +287,24 @@ if not df_comments.empty:
     fig.add_vline(x=0.70, line_dash="dash", line_color="white", opacity=0.3)
     st.plotly_chart(fig, use_container_width=True)
 
-    # 3. Video Ranking
+        # 3. Video Ranking
     st.subheader("🏆 Popular Topics (Sorted by Comment Count)")
+
+    # Wczytujemy również plik _camps.csv osobno do wyświetlania kart campów dla każdego filmu
+    camps_csv_path = Path(str(selected_csv).replace("_comments", "_camps"))
+    df_all_camps = pd.DataFrame()
+    if camps_csv_path.exists():
+        try:
+            df_all_camps = pd.read_csv(camps_csv_path, sep=";", encoding="utf-8-sig")
+            df_all_camps = df_all_camps.rename(columns={
+                'Camp Key': 'camp_key',
+                'Video Key': 'video_key',
+                'Camp Title': 'camp_title',
+                'Perspective Group': 'perspective_group',
+                'Camp Description': 'camp_description'
+            })
+        except Exception:
+            pass
 
     for idx, row in df_clusters.reset_index().iterrows():
         with st.expander(f"#{idx+1} | 💬 {row['total_comments']:,} comments | {row['topic_name']}"):
@@ -327,40 +323,36 @@ if not df_comments.empty:
                 st.link_button("Watch Video", row['link'])
             
             with c_camps:
+                video_key = row.get('video_key', None)
+                video_camps = df_all_camps[df_all_camps['video_key'] == video_key] if not df_all_camps.empty and video_key else pd.DataFrame()
                 video_comments = df_comments[df_comments['title'] == row['topic_name']]
-                if not video_comments.empty:
-                    row_data = video_comments.iloc[0]
-                    
-                    active_camps = []
-                    for camp_letter in ['A', 'B', 'C', 'D', 'E']:
-                        def_col = f"Camp {camp_letter}"
-                        share_col = f"Percent Share of Camp {camp_letter}"
-                        if def_col in row_data and share_col in row_data:
-                            c_def = row_data[def_col]
-                            c_share = row_data[share_col]
-                            if pd.notna(c_def) and str(c_def).strip() != "" and pd.notna(c_share) and c_share > 0:
-                                active_camps.append((camp_letter, c_def, c_share))
-                    
-                    if active_camps:
-                        camp_cols = st.columns(len(active_camps))
-                        for i, (camp_id, desc, share) in enumerate(active_camps):
-                            with camp_cols[i]:
-                                st.markdown(f"""
-                                <div class="camp-box">
-                                    <b style="color: #58a6ff; font-size: 1.1rem;">Camp {camp_id}</b><br>
-                                    <p style="color: #8b949e; font-size: 0.85rem; margin-top: 8px;">{desc}</p>
-                                </div>
-                                """, unsafe_allow_html=True)
-                                
-                                top_arg = video_comments[video_comments['stance'] == camp_id]['core_argument'].mode()
-                                if not top_arg.empty:
-                                    st.markdown(f"""
-                                    <div class="argument-box">
-                                        📌 <i>{top_arg[0]}</i>
-                                    </div>
-                                    """, unsafe_allow_html=True)
-                    else:
-                        st.info("No distinct camps identified for this video.")
+
+                if not video_camps.empty:
+                    camp_cols = st.columns(len(video_camps))
+                    for i, (_, camp_row) in enumerate(video_camps.iterrows()):
+                        c_id = camp_row['camp_key']
+                        c_title = camp_row.get('camp_title', f"Camp {i+1}")
+                        c_desc = camp_row.get('camp_description', '')
+                        
+                        with camp_cols[i]:
+                            st.markdown(f"""
+                            <div class="camp-box">
+                                <b style="color: #58a6ff; font-size: 1.1rem;">{c_title}</b><br>
+                                <p style="color: #8b949e; font-size: 0.85rem; margin-top: 8px;">{c_desc}</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                            # Szukamy najczęstszego argumentu w komentarzach przypisanych do tego campu po camp_key
+                            if not video_comments.empty and 'camp_key' in video_comments.columns:
+                                camp_comms = video_comments[video_comments['camp_key'] == c_id]
+                                if not camp_comms.empty and 'core_argument' in camp_comms.columns:
+                                    top_arg = camp_comms['core_argument'].mode()
+                                    if not top_arg.empty:
+                                        st.markdown(f"""
+                                        <div class="argument-box">
+                                            📌 <i>{top_arg[0]}</i>
+                                        </div>
+                                        """, unsafe_allow_html=True)
                 else:
                     st.info("No distinct camps identified for this video.")
 

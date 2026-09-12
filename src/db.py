@@ -29,7 +29,7 @@ def init_db():
     );
     """)
 
-    # 2. Videos dimension.
+        # 2. Videos dimension.
     con.execute("""
     CREATE TABLE IF NOT EXISTS Dim_Videos (
         video_key BIGINT PRIMARY KEY,
@@ -39,10 +39,9 @@ def init_db():
         channel_title VARCHAR,
         published_at TIMESTAMP,
         views BIGINT,
-        likes BIGINT,
+        total_likes BIGINT,
         comments_count BIGINT,
         views_per_hour DOUBLE,
-        channel_subs BIGINT,
         duration VARCHAR,
         tags VARCHAR,
         description VARCHAR,
@@ -53,7 +52,7 @@ def init_db():
         # 3. Comment facts and AI analysis.
     con.execute("""
     CREATE TABLE IF NOT EXISTS Fact_Comments (
-        comment_key BIGINT,
+        comment_key BIGINT PRIMARY KEY,
         video_key BIGINT,
         comment_id VARCHAR UNIQUE,
         text VARCHAR,
@@ -63,33 +62,28 @@ def init_db():
         reply_count BIGINT,
         is_reply BOOLEAN,
         engagement_score BIGINT,
-        stance VARCHAR,              -- CAMP_A..E, NEUTRAL_SPAM
+        camp_key BIGINT,             -- Klucz obcy do Dim_Camps
         arousal_score DOUBLE,        -- 0.0 to 1.0
         emotion_tag VARCHAR,
         core_argument VARCHAR,
+        FOREIGN KEY (video_key) REFERENCES Dim_Videos(video_key),
+        FOREIGN KEY (camp_key) REFERENCES Dim_Camps(camp_key)
+    );
+    """)
+
+    # 4. Camps dimension (relacyjny układ dla _camps.csv).
+    con.execute("""
+    CREATE TABLE IF NOT EXISTS Dim_Camps (
+        camp_key BIGINT PRIMARY KEY,
+        video_key BIGINT,
+        camp_title VARCHAR,
+        perspective_group VARCHAR,
+        camp_description VARCHAR,
         FOREIGN KEY (video_key) REFERENCES Dim_Videos(video_key)
     );
     """)
 
-    # 4. Camps dimension (wide format matching _camps.csv).
-    con.execute("""
-    CREATE TABLE IF NOT EXISTS Dim_Camps (
-        video_key BIGINT PRIMARY KEY,
-        camp_a VARCHAR,
-        percent_share_camp_a DOUBLE,
-        camp_b VARCHAR,
-        percent_share_camp_b DOUBLE,
-        camp_c VARCHAR,
-        percent_share_camp_c DOUBLE,
-        camp_d VARCHAR,
-        percent_share_camp_d DOUBLE,
-        camp_e VARCHAR,
-        percent_share_camp_e DOUBLE,
-        FOREIGN KEY (video_key) REFERENCES Dim_Videos(video_key)
-    );
-    """)
-    
-    # 4. Aggregated topic clusters (TOI).
+        # 5. Aggregated topic clusters (TOI).
     con.execute("""
     CREATE TABLE IF NOT EXISTS Dim_Clusters (
         cluster_id VARCHAR PRIMARY KEY,

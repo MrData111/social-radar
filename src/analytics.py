@@ -5,10 +5,17 @@ import pandas as pd
 def calculate_shannon_polarization(stance_series):
     """
     Calculate normalized Shannon entropy across all detected camps.
-    Neutral or spam comments are excluded from the camp distribution.
+    Accepts both categorical letter series (A..E) and numeric camp_keys.
     """
-    counts = stance_series.value_counts()
-    camp_counts = counts[counts.index.to_series().str.match(r"^[A-E]$")]
+    if stance_series is None or len(stance_series) == 0:
+        return 0.0
+
+    # Convert numeric keys or object types to string series safely
+    s_clean = stance_series.dropna().astype(str)
+    counts = s_clean.value_counts()
+    
+    # Filter out neutral/spam if string labels exist, otherwise keep all valid camp counts
+    camp_counts = counts[counts.index.str.match(r"^[A-E]$|^[0-9]+$")] if not counts.empty else counts
     total_camp_comments = camp_counts.sum()
 
     if total_camp_comments == 0 or len(camp_counts) <= 1:
