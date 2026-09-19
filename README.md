@@ -16,5 +16,4 @@ Results can be checked in the Streamlit dashboard or for a better view in Power 
 - Translating non-English comments
 - Reddit comments integration
 - Automatic Power BI data refresh & import
-- 
 
