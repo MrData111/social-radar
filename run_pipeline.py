@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from googleapiclient.discovery import build
 import pandas as pd
-from src.enrichment import analyze_discourse_with_ai
+from src.enrichment import analyze_discourse_with_ai, group_camps_into_categories
 from src.analytics import compute_toi_cluster_metrics
 from src.db import get_connection, init_db
 
@@ -104,7 +104,7 @@ ranking_mode = input("👉 Choose 1-4 [1]: ").strip() or "1"
 if ranking_mode not in {"1", "2", "3", "4"}:
     ranking_mode = "1"
 
-max_videos = read_positive_integer("👉 Maximum videos to analyze", 1, 50)
+max_videos = read_positive_integer("👉 Maximum videos to analyze", 1)
 max_comments_per_video = read_positive_integer("👉 Maximum comments per video", 100)
 max_video_age_days = read_positive_integer("👉 Maximum video age in days", 30)
 max_channel_subscribers_text = input(
@@ -195,6 +195,7 @@ analyzed_comments = []
 selected_videos = []
 
 # === 3. YOUTUBE FETCHING ===
+search_res_items = []
 if source_mode == "3":
     video_ids = provided_links[:max_videos]
 else:
@@ -214,25 +215,40 @@ else:
             raise RuntimeError("No YouTube creator matched the provided input.")
         channel_id = creator_items[0]["id"].get("channelId")
 
-    search_result_limit = 50
-    search_res = execute_with_retry(
-        lambda: youtube.search().list(
-            q=niche if source_mode == "1" else None,
-            channelId=channel_id,
-            part="id",
-            type="video",
-            publishedAfter=published_after,
-            maxResults=search_result_limit,
-            order="viewCount"
-        ),
-        "YouTube search"
-    )
+    page_token = None
+    # Pobieramy tyle stron, ile potrzebujemy, aby zebrać co najmniej max_videos (lub do wyczerpania wyników)
+    while len(search_res_items) < max_videos:
+        batch_limit = min(50, max_videos - len(search_res_items))
+        if batch_limit <= 0:
+            break
+        search_res = execute_with_retry(
+            lambda: youtube.search().list(
+                q=niche if source_mode == "1" else None,
+                channelId=channel_id,
+                part="id",
+                type="video",
+                publishedAfter=published_after,
+                maxResults=batch_limit,
+                order="viewCount",
+                pageToken=page_token
+            ),
+            "YouTube search"
+        )
+        items = search_res.get("items", [])
+        if not items:
+            break
+        search_res_items.extend(items)
+        page_token = search_res.get("nextPageToken")
+        if not page_token:
+            break
 
     video_ids = [
         item["id"]["videoId"]
-        for item in search_res.get("items", [])
+        for item in search_res_items
         if re.fullmatch(r"[A-Za-z0-9_-]{11}", item.get("id", {}).get("videoId", ""))
     ]
+    # Usuwamy duplikaty zachowując kolejność
+    video_ids = list(dict.fromkeys(video_ids))
 
 if not video_ids:
     raise RuntimeError("No videos matched the selected search criteria.")
@@ -429,6 +445,7 @@ if video_ids:
                 (result.get("published_at") or "")[:10], likes, replies, is_rep, eng_score,
                 result["stance"], result["arousal_score"],
                 result["emotion_tag"], result["core_argument"],
+                result.get("unresolved_question") or "",
                 f"https://www.youtube.com/watch?v={video['id']}",
                 coverage_label,
                 camp_shares
@@ -542,17 +559,29 @@ camps_export_rows = []
 camp_lookup = {}
 camp_row_counter = 1
 
+# Collect all identified camps across all videos for macro-categorization
+all_collected_camps = []
+for video in selected_videos:
+    for camp in video.get("identified_camps", []):
+        all_collected_camps.append(camp)
+
+print(f"\n🧠 Sending {len(all_collected_camps)} extracted camps to AI for macro-categorization (up to 6 categories)...")
+camp_category_mapping = group_camps_into_categories(all_collected_camps, niche)
+
 for video in selected_videos:
     v_key = video_key_map[video["id"]]
     video_camps = video.get("identified_camps", [])
     
     for camp in video_camps:
         raw_letter = str(camp.get("camp_letter", "")).upper().replace("CAMP_", "")
+        title_val = str(camp.get("camp_title", ""))
         
         # Zapisujemy mapowanie: (video_id, raw_letter) -> globalny camp_row_counter
         camp_lookup[(video["id"], raw_letter)] = camp_row_counter
 
-        title_val = str(camp.get("camp_title", ""))
+        # Determine camp category using lookup (fallback to "General Discussion")
+        camp_cat = camp_category_mapping.get((raw_letter, title_val)) or camp_category_mapping.get(raw_letter) or camp_category_mapping.get(title_val) or "General Discussion"
+
         if title_val:
             title_val = title_val[0].upper() + title_val[1:]
             
@@ -569,6 +598,7 @@ for video in selected_videos:
             v_key,
             title_val,
             pers_val,
+            camp_cat,
             desc_val
         ])
         camp_row_counter += 1
@@ -580,6 +610,7 @@ with open(output_camps_csv, "w", newline="", encoding="utf-8-sig") as output_fil
         "Video Key",
         "Camp Title",
         "Perspective Group",
+        "Camp Category",
         "Camp Description"
     ])
     writer.writerows(camps_export_rows)
@@ -590,8 +621,8 @@ for idx, row in enumerate(csv_rows, start=1):
     v_id = row[0]
     v_key = video_key_map.get(v_id, 1)
     raw_stance = str(row[13]).upper().replace("CAMP_", "")
-    # Pobieramy globalny Camp Key z mapowania (lub domyślnie 1, jeśli brak dopasowania)
-    c_key = camp_lookup.get((v_id, raw_stance), 1)
+    # Jeśli stan to NEUTRAL lub brak dopasowania w słowniku, ustawiamy Camp Key jako None (NULL w pliku)
+    c_key = camp_lookup.get((v_id, raw_stance)) if raw_stance in {"A", "B", "C", "D", "E"} else None
 
     comments_export_rows.append([
         idx,     # Comment Key
@@ -604,10 +635,11 @@ for idx, row in enumerate(csv_rows, start=1):
         row[10], # Reply Count
         row[11], # Is Reply
         row[12], # Engagement Score
-        c_key,   # Camp Key (zastąpił Camp Letter)
+        c_key if c_key is not None else "",   # Camp Key (puste pole jako NULL w CSV)
         row[14], # Arousal Score
         row[15], # Emotion
-        row[16]  # Core Argument
+        row[16], # Core Argument
+        row[17]  # Unresolved Question
     ])
 
 with open(output_comments_csv, "w", newline="", encoding="utf-8-sig") as output_file:
@@ -615,7 +647,7 @@ with open(output_comments_csv, "w", newline="", encoding="utf-8-sig") as output_
     writer.writerow([
         "Comment Key", "Comment ID", "Video Key", "Comment", "Author", "Comment Date", 
         "Likes", "Reply Count", "Is Reply", "Engagement Score",
-        "Camp Key", "Arousal Score", "Emotion", "Core Argument"
+        "Camp Key", "Arousal Score", "Emotion", "Core Argument", "Unresolved Question"
     ])
     writer.writerows(comments_export_rows)
 

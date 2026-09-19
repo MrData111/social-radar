@@ -105,7 +105,7 @@ def load_csv_data(file_path):
             if 'video_key' in df_comms.columns and 'video_key' in df_vids.columns:
                 df_comms = df_comms.merge(df_vids, on='video_key', how='left')
 
-        # Szukamy powiązanego pliku _camps.csv i łączymy po camp_key
+                # Szukamy powiązanego pliku _camps.csv i łączymy po camp_key
         camps_csv = Path(str(file_path).replace("_comments", "_camps"))
         if camps_csv.exists():
             df_camps = pd.read_csv(camps_csv, sep=";", encoding="utf-8-sig")
@@ -114,12 +114,13 @@ def load_csv_data(file_path):
                 'Video Key': 'video_key',
                 'Camp Title': 'camp_title',
                 'Perspective Group': 'perspective_group',
+                'Camp Category': 'camp_category',
                 'Camp Description': 'camp_description'
             }
             df_camps = df_camps.rename(columns=camps_mapping)
 
             if 'camp_key' in df_comms.columns and 'camp_key' in df_camps.columns:
-                df_comms = df_comms.merge(df_camps, on=['camp_key', 'video_key'], how='left')
+                df_comms = df_comms.merge(df_comms, on=['camp_key', 'video_key'], how='left') if 'camp_key' in df_comms.columns else df_comms
                 
         # Konwersja typów numerycznych
         df_comms['like_count'] = pd.to_numeric(df_comms['like_count'], errors='coerce').fillna(0)
@@ -290,7 +291,7 @@ if not df_comments.empty:
         # 3. Video Ranking
     st.subheader("🏆 Popular Topics (Sorted by Comment Count)")
 
-    # Wczytujemy również plik _camps.csv osobno do wyświetlania kart campów dla każdego filmu
+        # Wczytujemy również plik _camps.csv osobno do wyświetlania kart campów dla każdego filmu
     camps_csv_path = Path(str(selected_csv).replace("_comments", "_camps"))
     df_all_camps = pd.DataFrame()
     if camps_csv_path.exists():
@@ -301,6 +302,7 @@ if not df_comments.empty:
                 'Video Key': 'video_key',
                 'Camp Title': 'camp_title',
                 'Perspective Group': 'perspective_group',
+                'Camp Category': 'camp_category',
                 'Camp Description': 'camp_description'
             })
         except Exception:
@@ -332,13 +334,15 @@ if not df_comments.empty:
                     for i, (_, camp_row) in enumerate(video_camps.iterrows()):
                         c_id = camp_row['camp_key']
                         c_title = camp_row.get('camp_title', f"Camp {i+1}")
+                        c_cat = camp_row.get('camp_category', 'General')
                         c_desc = camp_row.get('camp_description', '')
                         
                         with camp_cols[i]:
                             st.markdown(f"""
                             <div class="camp-box">
-                                <b style="color: #58a6ff; font-size: 1.1rem;">{c_title}</b><br>
-                                <p style="color: #8b949e; font-size: 0.85rem; margin-top: 8px;">{c_desc}</p>
+                                <span style="background-color: #388bfd22; color: #58a6ff; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; border: 1px solid #388bfd55;">🏷️ {c_cat}</span><br>
+                                <b style="color: #ffffff; font-size: 1.05rem; margin-top: 4px; display: inline-block;">{c_title}</b><br>
+                                <p style="color: #8b949e; font-size: 0.85rem; margin-top: 6px;">{c_desc}</p>
                             </div>
                             """, unsafe_allow_html=True)
                             

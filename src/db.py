@@ -8,10 +8,10 @@ def get_connection():
 def init_db():
     con = get_connection()
     
-    # Drop existing tables in reverse order of foreign key dependencies to avoid Catalog Error
+    # Drop existing tables in strict reverse order of foreign key dependencies
     con.execute("DROP TABLE IF EXISTS Dim_Clusters;")
-    con.execute("DROP TABLE IF EXISTS Dim_Camps;")
     con.execute("DROP TABLE IF EXISTS Fact_Comments;")
+    con.execute("DROP TABLE IF EXISTS Dim_Camps;")
     con.execute("DROP TABLE IF EXISTS Dim_Videos;")
     con.execute("DROP TABLE IF EXISTS Dim_Channels;")
 
@@ -49,7 +49,7 @@ def init_db():
     );
     """)
     
-        # 3. Comment facts and AI analysis.
+                # 3. Comment facts and AI analysis.
     con.execute("""
     CREATE TABLE IF NOT EXISTS Fact_Comments (
         comment_key BIGINT PRIMARY KEY,
@@ -66,18 +66,20 @@ def init_db():
         arousal_score DOUBLE,        -- 0.0 to 1.0
         emotion_tag VARCHAR,
         core_argument VARCHAR,
+        unresolved_question VARCHAR, -- Nierozwiązane pytanie od widzów
         FOREIGN KEY (video_key) REFERENCES Dim_Videos(video_key),
         FOREIGN KEY (camp_key) REFERENCES Dim_Camps(camp_key)
     );
     """)
 
-    # 4. Camps dimension (relacyjny układ dla _camps.csv).
+        # 4. Camps dimension (relacyjny układ dla _camps.csv).
     con.execute("""
     CREATE TABLE IF NOT EXISTS Dim_Camps (
         camp_key BIGINT PRIMARY KEY,
         video_key BIGINT,
         camp_title VARCHAR,
         perspective_group VARCHAR,
+        camp_category VARCHAR,
         camp_description VARCHAR,
         FOREIGN KEY (video_key) REFERENCES Dim_Videos(video_key)
     );

@@ -12,13 +12,8 @@ __pycache__/
 # Ukrywamy ustawienia edytora
 .vscode/
 .refact/
-<<<<<<< HEAD
 .continue/
 continue/
 
 # Ukrywamy wygenerowane raporty i dane eksperymentalne
 exports/
-=======
-
-.continueignore
->>>>>>> 696181c9740e110d1427d06bd18b10a0cd5aab89
